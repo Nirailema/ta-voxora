@@ -56,6 +56,15 @@ class DocumentController extends Controller
         ]);
 
         try {
+            // Pre-check: verify document has extractable text
+            if ($mimeType === 'application/pdf' && $this->processor->isPdfImageBased($storagePath)) {
+                throw new \Exception('Dokumen PDF ini merupakan hasil scan (gambar). Ekstraksi teks tidak tersedia untuk dokumen scan. Silakan gunakan PDF berbasis teks atau dokumen DOCX.');
+            }
+
+            if ($mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && !$this->processor->isDocxHasText($storagePath)) {
+                throw new \Exception('Dokumen DOCX tidak mengandung teks yang dapat diekstrak. Pastikan dokumen mengandung teks, bukan hanya gambar.');
+            }
+
             // Extract text
             $rawText = $this->processor->extractText($storagePath, $mimeType);
 
@@ -63,7 +72,7 @@ class DocumentController extends Controller
             $sanitizedText = $this->processor->sanitizeText($rawText);
 
             if (empty(trim($sanitizedText))) {
-                throw new \Exception('Tidak dapat mengekstrak teks dari dokumen.');
+                throw new \Exception('Tidak dapat mengekstrak teks dari dokumen. Pastikan dokumen mengandung teks yang dapat dibaca.');
             }
 
             // Infer title

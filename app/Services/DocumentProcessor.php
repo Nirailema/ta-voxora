@@ -25,6 +25,40 @@ class DocumentProcessor
         };
     }
 
+    public function isPdfImageBased(string $path): bool
+    {
+        $parser = new PdfParser();
+        $pdf = $parser->parseFile($path);
+        $pages = $pdf->getPages();
+
+        if (empty($pages)) {
+            return true;
+        }
+
+        foreach ($pages as $page) {
+            $pageText = trim($page->getText());
+            if (!empty($pageText)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function isDocxHasText(string $path): bool
+    {
+        $phpWord = IOFactory::load($path, 'Word2007');
+        $text = '';
+
+        foreach ($phpWord->getSections() as $section) {
+            foreach ($section->getElements() as $element) {
+                $text .= $this->extractTextFromElement($element);
+            }
+        }
+
+        return !empty(trim($text));
+    }
+
     protected function extractFromPdf(string $path): string
     {
         $parser = new PdfParser();
