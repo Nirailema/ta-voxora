@@ -12,7 +12,8 @@ class DocumentProcessor
 {
     public function extractText(string $filePath, string $mimeType): string
     {
-        $fullPath = storage_path("app/{$filePath}");
+        // Disk 'local' root is storage/app/private, so path should be prepended with 'private/'
+        $fullPath = storage_path("app/private/{$filePath}");
 
         if (!file_exists($fullPath)) {
             throw new \Exception("File not found: {$fullPath}");
@@ -25,10 +26,52 @@ class DocumentProcessor
         };
     }
 
+    private function validateFile(string $path): void
+    {
+        if (!file_exists($path)) {
+            throw new \Exception("File tidak ditemukan di path: {$path}. Pastikan file berhasil disimpan dengan benar.");
+        }
+
+        if (!is_readable($path)) {
+            throw new \Exception("File tidak dapat dibaca. Periksa hak akses file.");
+        }
+    }
+
+    private function validateZipArchive(string $path): void
+    {
+        $this->validateFile($path);
+
+        $zip = new \ZipArchive();
+        $result = $zip->open($path);
+
+        if ($result === true) {
+            $zip->close();
+            return;
+        }
+
+        $zipErrorMessages = [
+            \ZipArchive::ER_EXISTS => 'File sudah ada',
+            \ZipArchive::ER_INCONS => 'Zip archive tidak konsisten',
+            \ZipArchive::ER_INVAL => 'Nama file tidak valid',
+            \ZipArchive::ER_MEMORY => 'Gagal alokasi memori',
+            \ZipArchive::ER_NOENT => 'File tidak ada atau path tidak valid',
+            \ZipArchive::ER_NOZIP => 'File bukan arsip ZIP yang valid - kemungkinan file corrupt atau bukan format DOCX',
+            \ZipArchive::ER_OPEN => 'Tidak dapat membuka file - periksa hak akses file',
+            \ZipArchive::ER_READ => 'Gagal membaca file - file mungkin corrupt',
+            \ZipArchive::ER_SEEK => 'Gagal mencari posisi dalam file',
+        ];
+
+        $errorMsg = $zipErrorMessages[$result] ?? "Error tidak diketahui (code: {$result})";
+        throw new \Exception("File tidak dapat dibaca sebagai arsip ZIP. {$errorMsg}. Pastikan file adalah DOCX yang valid dan tidak corrupt.");
+    }
+
     public function isPdfImageBased(string $path): bool
     {
+        $fullPath = storage_path("app/private/{$path}");
+        $this->validateFile($fullPath);
+
         $parser = new PdfParser();
-        $pdf = $parser->parseFile($path);
+        $pdf = $parser->parseFile($fullPath);
         $pages = $pdf->getPages();
 
         if (empty($pages)) {
@@ -47,7 +90,10 @@ class DocumentProcessor
 
     public function isDocxHasText(string $path): bool
     {
-        $phpWord = IOFactory::load($path, 'Word2007');
+        $fullPath = storage_path("app/private/{$path}");
+        $this->validateFile($fullPath);
+
+        $phpWord = IOFactory::load($fullPath, 'Word2007');
         $text = '';
 
         foreach ($phpWord->getSections() as $section) {
@@ -61,6 +107,8 @@ class DocumentProcessor
 
     protected function extractFromPdf(string $path): string
     {
+        $this->validateFile($path);
+
         $parser = new PdfParser();
         $pdf = $parser->parseFile($path);
         $text = $pdf->getText();
@@ -73,6 +121,8 @@ class DocumentProcessor
 
     protected function extractFromDocx(string $path): string
     {
+        $this->validateZipArchive($path);
+
         $phpWord = IOFactory::load($path, 'Word2007');
         $text = '';
 
@@ -89,8 +139,18 @@ class DocumentProcessor
     {
         $text = '';
 
+        if ($element instanceof \PhpOffice\PhpWord\Element\TextRun) {
+            foreach ($element->getElements() as $child) {
+                $text .= $this->extractTextFromElement($child) . ' ';
+            }
+            return $text;
+        }
+
         if (method_exists($element, 'getText')) {
-            $text = $element->getText();
+            $result = $element->getText();
+            if (is_string($result)) {
+                $text = $result;
+            }
         }
 
         // Handle nested elements
